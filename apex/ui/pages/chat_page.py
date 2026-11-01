@@ -22,6 +22,9 @@ from apex.core.logging import logger
 from apex.core.memory import memory_service
 from apex.core.providers.base import BaseAIProvider, ProviderResponse
 from apex.core.providers.registry import registry
+from apex.core.voice.state import voice_state
+from apex.core.voice.stt import stt_service
+from apex.core.voice.tts import tts_service
 from apex.ui.styles.palette import (
     ACCENT_CYAN,
     ACCENT_PRIMARY,
@@ -178,6 +181,16 @@ class ChatPage(QWidget):
         )
         top_bar.addWidget(self.conv_title_label)
         top_bar.addStretch()
+
+        # Audio Playback Toggle Button
+        self.audio_toggle_btn = QPushButton("🔊 Voice Output")
+        self.audio_toggle_btn.setProperty("class", "secondary-btn")
+        self.audio_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.audio_toggle_btn.setToolTip("Toggle AI spoken voice output")
+        self.audio_toggle_btn.clicked.connect(self._toggle_voice_output)
+        self._update_audio_toggle_ui()
+        top_bar.addWidget(self.audio_toggle_btn)
+
         top_bar.addWidget(self.provider_pill)
         chat_layout.addLayout(top_bar)
 
@@ -252,14 +265,16 @@ class ChatPage(QWidget):
         )
         self.message_input.returnPressed.connect(self.send_message)
 
-        # Voice placeholder button
-        voice_btn = QPushButton("🎙️")
-        voice_btn.setFixedSize(36, 36)
-        voice_btn.setToolTip("Voice input / Push-to-talk (Stage 4)")
-        voice_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        voice_btn.setStyleSheet(
-            f"background: transparent; border: none; font-size: 16px; color: {TEXT_MUTED};"
+        # Push-to-Talk Microphone Button
+        self.voice_btn = QPushButton("🎙️")
+        self.voice_btn.setFixedSize(36, 36)
+        self.voice_btn.setToolTip("Hold to speak (Push-to-Talk) / Click to dictate")
+        self.voice_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.voice_btn.setStyleSheet(
+            f"background: transparent; border: 1px solid {BORDER_COLOR}; border-radius: 18px; font-size: 16px; color: {ACCENT_CYAN};"
         )
+        self.voice_btn.pressed.connect(self._on_mic_pressed)
+        self.voice_btn.released.connect(self._on_mic_released)
 
         # Send Button
         self.send_btn = QPushButton("Send")
@@ -269,7 +284,7 @@ class ChatPage(QWidget):
 
         composer_layout.addWidget(attach_btn)
         composer_layout.addWidget(self.message_input)
-        composer_layout.addWidget(voice_btn)
+        composer_layout.addWidget(self.voice_btn)
         composer_layout.addWidget(self.send_btn)
 
         chat_layout.addWidget(composer_frame)
@@ -370,6 +385,7 @@ class ChatPage(QWidget):
 
     def send_message(self) -> None:
         """Send user message and dispatch async inference to active AI provider."""
+        tts_service.stop()
         text = self.message_input.text().strip()
         if not text or not self.active_conv_id:
             return
@@ -428,6 +444,7 @@ class ChatPage(QWidget):
 
     def cancel_generation(self) -> None:
         """Cancel ongoing AI worker thread."""
+        tts_service.stop()
         if self.ai_worker and self.ai_worker.isRunning():
             self.ai_worker.cancel()
             self.ai_worker.wait(500)
@@ -444,6 +461,7 @@ class ChatPage(QWidget):
 
     def closeEvent(self, event) -> None:
         """Ensure background threads are safely terminated upon page closure."""
+        tts_service.stop()
         if self.ai_worker and self.ai_worker.isRunning():
             self.ai_worker.cancel()
             self.ai_worker.wait(500)
@@ -461,6 +479,10 @@ class ChatPage(QWidget):
         self.messages_layout.insertWidget(self.messages_layout.count() - 1, assistant_bubble)
         self._scroll_to_bottom()
 
+        # Speak response aloud if TTS audio is enabled
+        if response.success and response.content:
+            tts_service.speak(response.content)
+
     def _on_ai_failure(self, error_message: str) -> None:
         """Handle error from background AI worker."""
         self._reset_composer_state()
@@ -473,6 +495,43 @@ class ChatPage(QWidget):
         assistant_bubble = ChatBubble(role="assistant", content=err_text, timestamp=now)
         self.messages_layout.insertWidget(self.messages_layout.count() - 1, assistant_bubble)
         self._scroll_to_bottom()
+
+    def _toggle_voice_output(self) -> None:
+        voice_state.set_tts_enabled(not voice_state.tts_enabled)
+        self._update_audio_toggle_ui()
+        if not voice_state.tts_enabled:
+            tts_service.stop()
+
+    def _update_audio_toggle_ui(self) -> None:
+        if voice_state.tts_enabled:
+            self.audio_toggle_btn.setText("🔊 Voice Audio On")
+            self.audio_toggle_btn.setStyleSheet(
+                f"background-color: rgba(16, 185, 129, 0.15); color: {STATUS_ONLINE}; border: 1px solid {STATUS_ONLINE}; border-radius: 8px; padding: 4px 10px; font-size: 11px; font-weight: 600;"
+            )
+        else:
+            self.audio_toggle_btn.setText("🔇 Voice Audio Muted")
+            self.audio_toggle_btn.setStyleSheet(
+                f"background-color: rgba(100, 116, 139, 0.15); color: {TEXT_MUTED}; border: 1px solid {BORDER_COLOR}; border-radius: 8px; padding: 4px 10px; font-size: 11px; font-weight: 600;"
+            )
+
+    def _on_mic_pressed(self) -> None:
+        tts_service.stop()
+        if stt_service.start_push_to_talk():
+            self.voice_btn.setStyleSheet(
+                "background-color: rgba(239, 68, 68, 0.25); border: 2px solid #EF4444; border-radius: 18px; font-size: 16px; color: #EF4444;"
+            )
+            self.thinking_label.setText("🎙️ Listening (Push-to-Talk active)... Release to send")
+            self.thinking_label.setVisible(True)
+
+    def _on_mic_released(self) -> None:
+        self.voice_btn.setStyleSheet(
+            f"background: transparent; border: 1px solid {BORDER_COLOR}; border-radius: 18px; font-size: 16px; color: {ACCENT_CYAN};"
+        )
+        self.thinking_label.setVisible(False)
+        transcribed_text = stt_service.stop_push_to_talk()
+        if transcribed_text:
+            self.message_input.setText(transcribed_text)
+            self.send_message()
 
     def _reset_composer_state(self) -> None:
         self.thinking_label.setVisible(False)

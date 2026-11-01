@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.10.0",
     "keyring>=25.0.0",
     "google-genai>=1.0.0",
+    "pyttsx3>=2.90.0",
 ]
 
 [project.optional-dependencies]

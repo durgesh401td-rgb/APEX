@@ -34,6 +34,15 @@
 - [x] Add clear vault confirmation workflow.
 - [x] Automated test coverage for memory persistence and UI.
 
+## Stage 4 — Voice
+
+- [x] Implement Push-to-Talk (press-and-hold mic button in composer).
+- [x] Implement non-blocking Text-to-Speech (TTS) service using native Windows SAPI5 (`Microsoft David` deep, calm male voice).
+- [x] Implement Speech-to-Text (STT) capture and adapter interface.
+- [x] Add reactive visualizer states (idle, listening, thinking, speaking, muted).
+- [x] Add physical/software mute controls and audio playback toggle.
+- [x] Automated test coverage for voice state, TTS markdown sanitization, and STT workflow.
+
 ## Later stages
 
 See `06_ROADMAP.md`. Do not start later-stage work before Stage 1 acceptance is met.

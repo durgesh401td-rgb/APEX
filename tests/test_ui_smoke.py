@@ -151,3 +151,22 @@ def test_memory_page_navigation_and_cards(qapp):
     # Toggle back to active
     memory_page.pause_btn.click()
     assert "Active" in memory_page.pause_btn.text()
+
+
+def test_chat_audio_and_push_to_talk(qapp):
+    """Verify audio toggle and push-to-talk mic button in ChatPage."""
+    window = MainWindow()
+    chat_page = window.chat_page
+
+    # Audio output toggle
+    initial_text = chat_page.audio_toggle_btn.text()
+    chat_page.audio_toggle_btn.click()
+    assert chat_page.audio_toggle_btn.text() != initial_text
+    chat_page.audio_toggle_btn.click()
+    assert chat_page.audio_toggle_btn.text() == initial_text
+
+    # Push to talk button
+    chat_page._on_mic_pressed()
+    assert chat_page.thinking_label.isHidden() is False
+    chat_page._on_mic_released()
+    assert chat_page.thinking_label.isHidden() is True

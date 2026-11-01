@@ -1,10 +1,10 @@
 # 15 — Project Status
 
 **Product:** APEX  
-**Version:** v0.3.0 (Stage 3 User Memory Vault Complete)  
+**Version:** v0.4.0 (Stage 4 Voice Layer Complete)  
 **Date:** 2026-11-01  
-**Current phase:** Stage 3 Verified; Ready for Stage 4 (Voice & Wake Word)  
-**Implementation:** Stage 1, Stage 2, and Stage 3 operational  
+**Current phase:** Stage 4 Verified; Ready for Stage 5 (Safe PC Automation)  
+**Implementation:** Stages 1, 2, 3, and 4 operational  
 **Budget:** ₹0
 
 ## Completed
@@ -35,12 +35,17 @@
 - Clear Vault confirmation and Memory Pause/Active toggle switch.
 - Chat prompt context injection for approved long-term memories.
 - Explicit chat memory command handling ("remember: ...").
-- Automated test suite (23/23 tests passing via `pytest`).
+- Stage 4 Voice Layer:
+  - Non-blocking Windows SAPI5 TTS engine (`Microsoft David` deep, calm male voice).
+  - Push-to-Talk interactive microphone button in composer.
+  - Reactive visualizer states (idle, listening, thinking, speaking, muted).
+  - Software mute controls and spoken audio toggle button.
+- Automated test suite (28/28 tests passing via `pytest`).
 
 ## Pending owner decisions
 
-- Approval to proceed to Stage 4 (Voice Layer & Push-to-Talk).
+- Approval to proceed to Stage 5 (Safe PC Automation).
 
 ## Next action
 
-Begin Stage 4: Voice Layer (Push-to-talk first, audio input/output capture, speech-to-text / text-to-speech adapter interfaces, and visible microphone activity indicators).
+Begin Stage 5: Safe PC Automation (Typed tool schemas, allowlist of low-risk applications, explicit permission confirmation dialogs, audit trail logging, and emergency stop controls).
