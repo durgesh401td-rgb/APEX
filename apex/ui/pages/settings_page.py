@@ -1,28 +1,30 @@
-"""Settings page for APEX."""
+"""Settings page for APEX with secure Windows Credential Manager integration."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
-    QSpacerItem,
-    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 from apex.core.config import config
+from apex.core.credentials import credentials
 from apex.core.database import db
 from apex.core.logging import logger
+from apex.core.providers.gemini_provider import CREDENTIAL_KEY as GEMINI_KEY_NAME
+from apex.core.providers.registry import registry
 from apex.ui.styles.palette import (
     ACCENT_CYAN,
     ACCENT_PRIMARY,
     BORDER_COLOR,
+    STATUS_ERROR,
     STATUS_ONLINE,
+    STATUS_WARNING,
     SURFACE_ELEVATED,
     SURFACE_PRIMARY,
     TEXT_MUTED,
@@ -34,8 +36,11 @@ from apex.ui.styles.palette import (
 class SettingsPage(QWidget):
     """Settings management page for appearance, AI provider, and system preferences."""
 
+    provider_changed = Signal(str)
+
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._nav_buttons = []
         self._init_ui()
         self.load_settings()
 
@@ -68,7 +73,6 @@ class SettingsPage(QWidget):
             ("About", 4),
         ]
 
-        self._nav_buttons = []
         for name, idx in categories:
             btn = QPushButton(name)
             btn.setProperty("class", "nav-btn")
@@ -168,6 +172,7 @@ class SettingsPage(QWidget):
         layout.addWidget(heading)
         layout.addWidget(desc)
 
+        # Provider Selector Card
         card = QFrame()
         card.setProperty("class", "content-card")
         card_layout = QVBoxLayout(card)
@@ -178,22 +183,74 @@ class SettingsPage(QWidget):
         self.provider_combo.setStyleSheet(
             f"background-color: {SURFACE_ELEVATED}; color: {TEXT_PRIMARY}; padding: 8px 12px; border: 1px solid {BORDER_COLOR}; border-radius: 8px;"
         )
-        self.provider_combo.addItems([
-            "Offline Mock Assistant (Stage 1 Default)",
-            "Google Gemini API (Stage 2 Free Tier Candidate)",
-            "Local Ollama / Llama.cpp (Optional)",
-            "Custom Provider Adapter"
-        ])
+        self.provider_combo.addItem("Offline Mock Assistant (Zero Cost / Offline)", "mock")
+        self.provider_combo.addItem("Google Gemini API (Free Tier: 15 RPM / ₹0)", "google_gemini")
+        self.provider_combo.currentIndexChanged.connect(self._on_provider_selection_changed)
         card_layout.addWidget(self.provider_combo)
 
+        # Gemini API Key Management Sub-card
+        self.key_container = QFrame()
+        self.key_container.setStyleSheet(
+            f"background-color: {SURFACE_ELEVATED}; border: 1px solid {BORDER_COLOR}; border-radius: 10px; padding: 14px;"
+        )
+        key_layout = QVBoxLayout(self.key_container)
+        key_layout.setSpacing(10)
+
+        key_title = QLabel("Google Gemini API Key (Stored in Windows Credential Manager):")
+        key_title.setStyleSheet(f"color: {TEXT_PRIMARY}; font-weight: 600; font-size: 12px;")
+        key_layout.addWidget(key_title)
+
+        key_input_row = QHBoxLayout()
+        self.key_input = QLineEdit()
+        self.key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.key_input.setPlaceholderText("Enter your Gemini API key (AIzaSy...)")
+        key_input_row.addWidget(self.key_input)
+
+        save_key_btn = QPushButton("Save Key")
+        save_key_btn.setProperty("class", "action-btn")
+        save_key_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_key_btn.clicked.connect(self._save_gemini_key)
+        key_input_row.addWidget(save_key_btn)
+
+        remove_key_btn = QPushButton("Remove Key")
+        remove_key_btn.setProperty("class", "secondary-btn")
+        remove_key_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        remove_key_btn.clicked.connect(self._remove_gemini_key)
+        key_input_row.addWidget(remove_key_btn)
+
+        key_layout.addLayout(key_input_row)
+
+        # Status and Test Connection row
+        test_row = QHBoxLayout()
+        self.key_status_label = QLabel("")
+        self.key_status_label.setStyleSheet("font-size: 11px;")
+
+        test_btn = QPushButton("⚡ Test API Connection")
+        test_btn.setProperty("class", "secondary-btn")
+        test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        test_btn.clicked.connect(self._test_gemini_connection)
+
+        test_row.addWidget(self.key_status_label)
+        test_row.addStretch()
+        test_row.addWidget(test_btn)
+        key_layout.addLayout(test_row)
+
+        self.test_result_label = QLabel("")
+        self.test_result_label.setWordWrap(True)
+        self.test_result_label.setStyleSheet("font-size: 12px; margin-top: 4px;")
+        key_layout.addWidget(self.test_result_label)
+
+        card_layout.addWidget(self.key_container)
+
+        # Security Note Card
         notice_box = QFrame()
         notice_box.setStyleSheet("background-color: #0E1522; border-radius: 8px; padding: 12px;")
         notice_layout = QVBoxLayout(notice_box)
-        notice_title = QLabel("🔒 Zero Secret Storage Rule")
+        notice_title = QLabel("🔒 Windows Credential Vault Guardrail")
         notice_title.setStyleSheet(f"color: {ACCENT_CYAN}; font-weight: 700; font-size: 12px;")
         notice_body = QLabel(
-            "API keys and credentials are never stored in source files, plain text, or SQLite. "
-            "Stage 2 will wire secure storage directly to Windows Credential Manager."
+            "API keys are encrypted and stored in Windows Credential Manager. "
+            "They are never written to source files, plain text, SQLite, or log outputs."
         )
         notice_body.setWordWrap(True)
         notice_body.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 11px;")
@@ -258,10 +315,10 @@ class SettingsPage(QWidget):
         card_layout.setSpacing(12)
 
         items = [
-            ("No Autonomous Execution", "APEX cannot run arbitrary shell commands without your policy confirmation."),
-            ("Local-First Storage", "All chat history and preferences are saved locally on your machine in SQLite."),
-            ("Zero Cloud Telemetry", "No background data or analytics are uploaded to any external server."),
-            ("Emergency Stop Support", "UI and shortcut controls will halt running background tasks immediately.")
+            ("Windows Credential Manager", "Secrets and API keys are stored in the OS-backed DPAPI encrypted vault."),
+            ("No Autonomous Shell Execution", "The AI model cannot execute arbitrary shell commands on your system."),
+            ("Local-First SQLite", "Chat history and settings remain locally on your SSD/HDD."),
+            ("Strict Redaction Logging", "All logs are automatically filtered so no sensitive keys or tokens are stored.")
         ]
 
         for title, detail in items:
@@ -291,7 +348,7 @@ class SettingsPage(QWidget):
         card_layout.setSpacing(10)
 
         card_layout.addWidget(QLabel("<b>Project:</b> APEX (Think • Assist • Achieve)"))
-        card_layout.addWidget(QLabel("<b>Version:</b> 0.1.0 (Stage 1 Core Desktop Baseline)"))
+        card_layout.addWidget(QLabel("<b>Version:</b> 0.2.0 (Stage 2 AI Connection)"))
         card_layout.addWidget(QLabel("<b>Host:</b> Dell Inspiron 15-3567 / Intel Core i3-7020U / 8 GB RAM"))
         card_layout.addWidget(QLabel("<b>Operating System:</b> Windows 10 Home (Build 19045.7807, 22H2)"))
         card_layout.addWidget(QLabel("<b>License & Budget:</b> Open Source / Personal Project / ₹0 Initial Budget"))
@@ -302,6 +359,68 @@ class SettingsPage(QWidget):
         return w
 
     # -------------------------------------------------------------------------
+    # Credential & Provider Actions
+    # -------------------------------------------------------------------------
+
+    def _on_provider_selection_changed(self, index: int) -> None:
+        provider_id = self.provider_combo.currentData()
+        is_gemini = provider_id == "google_gemini"
+        self.key_container.setVisible(is_gemini)
+        if is_gemini:
+            self._refresh_key_status()
+
+    def _refresh_key_status(self) -> None:
+        has_key = credentials.has_credential(GEMINI_KEY_NAME)
+        if has_key:
+            self.key_status_label.setText("🔒 API Key is securely stored in Windows Credential Manager")
+            self.key_status_label.setStyleSheet(f"color: {STATUS_ONLINE}; font-weight: 600;")
+        else:
+            self.key_status_label.setText("⚠️ No API Key currently saved in Windows Credential Manager")
+            self.key_status_label.setStyleSheet(f"color: {STATUS_WARNING}; font-weight: 600;")
+
+    def _save_gemini_key(self) -> None:
+        key = self.key_input.text().strip()
+        if not key:
+            self.test_result_label.setText("Please enter an API key to save.")
+            self.test_result_label.setStyleSheet(f"color: {STATUS_WARNING};")
+            return
+
+        success = credentials.save_credential(GEMINI_KEY_NAME, key)
+        if success:
+            self.key_input.clear()
+            self._refresh_key_status()
+            self.test_result_label.setText("✓ Gemini API Key successfully saved into Windows Credential Manager.")
+            self.test_result_label.setStyleSheet(f"color: {STATUS_ONLINE}; font-weight: 600;")
+        else:
+            self.test_result_label.setText("Failed to save key into Windows Credential Manager.")
+            self.test_result_label.setStyleSheet(f"color: {STATUS_ERROR};")
+
+    def _remove_gemini_key(self) -> None:
+        credentials.delete_credential(GEMINI_KEY_NAME)
+        self._refresh_key_status()
+        self.test_result_label.setText("Key removed from Windows Credential Manager.")
+        self.test_result_label.setStyleSheet(f"color: {TEXT_MUTED};")
+
+    def _test_gemini_connection(self) -> None:
+        provider = registry.get_provider("google_gemini")
+        if not provider:
+            self.test_result_label.setText("Gemini provider adapter not available.")
+            self.test_result_label.setStyleSheet(f"color: {STATUS_ERROR};")
+            return
+
+        self.test_result_label.setText("⚡ Testing connection to Google Gemini...")
+        self.test_result_label.setStyleSheet(f"color: {ACCENT_CYAN};")
+        self.repaint()
+
+        ok, msg = provider.test_connection()
+        if ok:
+            self.test_result_label.setText(f"✓ {msg}")
+            self.test_result_label.setStyleSheet(f"color: {STATUS_ONLINE}; font-weight: 600;")
+        else:
+            self.test_result_label.setText(f"✕ {msg}")
+            self.test_result_label.setStyleSheet(f"color: {STATUS_ERROR};")
+
+    # -------------------------------------------------------------------------
     # Persistence
     # -------------------------------------------------------------------------
 
@@ -309,20 +428,28 @@ class SettingsPage(QWidget):
         """Load settings from SQLite database or fallback to defaults."""
         app_name = db.get_setting("app_name", config.app_name)
         wake_phrase = db.get_setting("wake_phrase", config.wake_phrase)
-        provider = db.get_setting("ai_provider", "0")
+        active_provider_id = registry.get_active_provider_id()
 
         self.name_input.setText(app_name)
         self.wake_input.setText(wake_phrase)
-        try:
-            self.provider_combo.setCurrentIndex(int(provider))
-        except (ValueError, TypeError):
+
+        # Match provider combo
+        idx = self.provider_combo.findData(active_provider_id)
+        if idx >= 0:
+            self.provider_combo.setCurrentIndex(idx)
+        else:
             self.provider_combo.setCurrentIndex(0)
+
+        self._on_provider_selection_changed(self.provider_combo.currentIndex())
 
     def save_settings(self) -> None:
         """Persist modified settings to SQLite."""
         db.set_setting("app_name", self.name_input.text().strip() or config.app_name)
         db.set_setting("wake_phrase", self.wake_input.text().strip() or config.wake_phrase)
-        db.set_setting("ai_provider", str(self.provider_combo.currentIndex()))
 
-        logger.info("Application settings saved to SQLite")
+        provider_id = self.provider_combo.currentData()
+        registry.set_active_provider(provider_id)
+        self.provider_changed.emit(provider_id)
+
+        logger.info("Application settings and active provider saved to SQLite")
         self.feedback_label.setText("✓ Settings saved successfully")

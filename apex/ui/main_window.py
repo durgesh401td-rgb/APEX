@@ -94,6 +94,7 @@ class MainWindow(QMainWindow):
         # Connect Navigation Signals
         self.nav_rail.page_changed.connect(self._on_navigation)
         self.home_page.navigate_to.connect(self._on_home_navigation)
+        self.settings_page.provider_changed.connect(self.chat_page.refresh_provider_pill)
 
     def _on_navigation(self, page_index: int) -> None:
         self.stack.setCurrentIndex(page_index)
@@ -101,3 +102,11 @@ class MainWindow(QMainWindow):
     def _on_home_navigation(self, page_index: int) -> None:
         self.nav_rail.set_active_page(page_index)
         self.stack.setCurrentIndex(page_index)
+
+    def closeEvent(self, event) -> None:
+        """Safely shutdown any background workers on window close."""
+        if hasattr(self, "chat_page") and self.chat_page.ai_worker:
+            if self.chat_page.ai_worker.isRunning():
+                self.chat_page.ai_worker.cancel()
+                self.chat_page.ai_worker.wait(500)
+        super().closeEvent(event)

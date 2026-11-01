@@ -68,6 +68,10 @@ def test_chat_page_send_message(qapp):
     assert chat_page.messages_layout.count() > initial_count
     assert chat_page.message_input.text() == ""
 
+    # Safely wait for background worker to complete
+    if chat_page.ai_worker:
+        chat_page.ai_worker.wait(1000)
+
 
 def test_settings_page_persistence(qapp):
     """Verify saving settings updates both the UI state and SQLite."""
@@ -83,3 +87,41 @@ def test_settings_page_persistence(qapp):
     reloaded_page = window.settings_page
     reloaded_page.load_settings()
     assert reloaded_page.name_input.text() == "APEX Sentinel"
+
+
+def test_settings_provider_switch_updates_chat_pill(qapp):
+    """Verify switching provider in Settings updates ChatPage pill."""
+    window = MainWindow()
+    settings_page = window.settings_page
+    chat_page = window.chat_page
+
+    # Switch to Google Gemini
+    idx = settings_page.provider_combo.findData("google_gemini")
+    assert idx >= 0
+    settings_page.provider_combo.setCurrentIndex(idx)
+    settings_page.save_settings()
+
+    assert "Gemini" in chat_page.provider_pill.text()
+
+    # Switch back to Mock
+    mock_idx = settings_page.provider_combo.findData("mock")
+    settings_page.provider_combo.setCurrentIndex(mock_idx)
+    settings_page.save_settings()
+
+    assert "Mock" in chat_page.provider_pill.text()
+
+
+def test_chat_page_cancel_generation(qapp):
+    """Verify canceling generation resets the composer state."""
+    window = MainWindow()
+    chat_page = window.chat_page
+
+    chat_page.message_input.setText("Compute heavy reasoning task")
+    chat_page.send_message()
+
+    # Cancel immediately
+    chat_page.cancel_generation()
+
+    assert chat_page.stop_btn.isVisible() is False
+    assert chat_page.send_btn.isEnabled() is True
+    assert chat_page.thinking_label.isVisible() is False

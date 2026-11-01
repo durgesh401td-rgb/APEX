@@ -1,8 +1,8 @@
-"""Chat workspace page for APEX."""
+"""Chat workspace page for APEX with asynchronous AI provider integration."""
 
 from datetime import datetime, timezone
-from typing import Optional
-from PySide6.QtCore import Qt, QTimer
+from typing import Dict, List, Optional
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -19,10 +19,15 @@ from PySide6.QtWidgets import (
 )
 from apex.core.database import db
 from apex.core.logging import logger
+from apex.core.providers.base import BaseAIProvider, ProviderResponse
+from apex.core.providers.registry import registry
 from apex.ui.styles.palette import (
     ACCENT_CYAN,
     ACCENT_PRIMARY,
     BORDER_COLOR,
+    STATUS_ERROR,
+    STATUS_ONLINE,
+    STATUS_WARNING,
     SURFACE_ELEVATED,
     SURFACE_PRIMARY,
     TEXT_MUTED,
@@ -32,14 +37,48 @@ from apex.ui.styles.palette import (
 from apex.ui.widgets.chat_bubble import ChatBubble
 
 
+class AIWorkerThread(QThread):
+    """Background worker executing model inference without blocking the UI."""
+
+    response_ready = Signal(object)  # ProviderResponse
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        provider: BaseAIProvider,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str] = None,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.provider = provider
+        self.messages = messages
+        self.system_prompt = system_prompt
+        self._is_cancelled = False
+
+    def cancel(self) -> None:
+        self._is_cancelled = True
+
+    def run(self) -> None:
+        try:
+            resp = self.provider.generate(self.messages, system_prompt=self.system_prompt)
+            if not self._is_cancelled:
+                self.response_ready.emit(resp)
+        except Exception as e:
+            if not self._is_cancelled:
+                self.failed.emit(str(e))
+
+
 class ChatPage(QWidget):
     """Dedicated conversation workspace with history drawer, message canvas, and composer."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.active_conv_id: Optional[str] = None
+        self.ai_worker: Optional[AIWorkerThread] = None
         self._init_ui()
         self.load_conversations()
+        self.refresh_provider_pill()
 
     def _init_ui(self) -> None:
         main_layout = QHBoxLayout(self)
@@ -124,7 +163,7 @@ class ChatPage(QWidget):
         self.conv_title_label.setStyleSheet(
             f"font-size: 17px; font-weight: 700; color: {TEXT_PRIMARY};"
         )
-        self.provider_pill = QLabel("Mock AI (Stage 1)")
+        self.provider_pill = QLabel("Offline Mock Assistant")
         self.provider_pill.setStyleSheet(
             f"""
             background-color: rgba(22, 139, 255, 0.12);
@@ -154,15 +193,30 @@ class ChatPage(QWidget):
         self.messages_layout.addStretch()
 
         self.scroll_area.setWidget(self.messages_container)
+        # Canonical Qt auto-scroll: automatically track bottom when new content is added
+        self.scroll_area.verticalScrollBar().rangeChanged.connect(
+            lambda min_val, max_val: self.scroll_area.verticalScrollBar().setValue(max_val)
+        )
         chat_layout.addWidget(self.scroll_area)
 
         # Typing / Thinking Indicator (hidden by default)
-        self.thinking_label = QLabel("⚡ APEX is processing response...")
+        indicator_row = QHBoxLayout()
+        self.thinking_label = QLabel("⚡ APEX is thinking...")
         self.thinking_label.setStyleSheet(
             f"font-size: 12px; color: {ACCENT_CYAN}; padding-left: 12px; font-style: italic;"
         )
         self.thinking_label.setVisible(False)
-        chat_layout.addWidget(self.thinking_label)
+
+        self.stop_btn = QPushButton("⏹  Stop Generation")
+        self.stop_btn.setProperty("class", "secondary-btn")
+        self.stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.stop_btn.setVisible(False)
+        self.stop_btn.clicked.connect(self.cancel_generation)
+
+        indicator_row.addWidget(self.thinking_label)
+        indicator_row.addStretch()
+        indicator_row.addWidget(self.stop_btn)
+        chat_layout.addLayout(indicator_row)
 
         # Composer Box
         composer_frame = QFrame()
@@ -226,6 +280,15 @@ class ChatPage(QWidget):
         main_layout.addWidget(splitter)
 
     # -------------------------------------------------------------------------
+    # Provider & UI Helpers
+    # -------------------------------------------------------------------------
+
+    def refresh_provider_pill(self, provider_id: Optional[str] = None) -> None:
+        """Update top-right badge reflecting active model provider."""
+        provider = registry.get_active_provider()
+        self.provider_pill.setText(f"⚡ {provider.display_name}")
+
+    # -------------------------------------------------------------------------
     # Conversation Logic
     # -------------------------------------------------------------------------
 
@@ -234,7 +297,6 @@ class ChatPage(QWidget):
         self.conv_list_widget.clear()
         convs = db.list_conversations()
         if not convs:
-            # Create first welcome chat
             self.start_new_conversation("Welcome to APEX")
             return
 
@@ -243,7 +305,6 @@ class ChatPage(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, conv["id"])
             self.conv_list_widget.addItem(item)
 
-        # Select first conversation by default
         first_item = self.conv_list_widget.item(0)
         if first_item:
             self.conv_list_widget.setCurrentItem(first_item)
@@ -253,14 +314,13 @@ class ChatPage(QWidget):
         """Create a new conversation session."""
         conv_id = db.create_conversation(title=title)
         
-        # Add welcome intro message from APEX
+        provider = registry.get_active_provider()
         welcome_text = (
-            "Hello! I am APEX, your personal assistant. Stage 1 desktop environment "
-            "and local persistence are active. How can I help you today?"
+            f"Hello! I am APEX, powered by {provider.display_name}. "
+            "How can I assist your workflow today?"
         )
         db.add_message(conv_id, "assistant", welcome_text)
 
-        # Reload list and select new chat
         self.conv_list_widget.clear()
         convs = db.list_conversations()
         for conv in convs:
@@ -283,7 +343,6 @@ class ChatPage(QWidget):
 
     def _load_messages_for_active_conv(self) -> None:
         """Clear message viewport and load messages from SQLite."""
-        # Clear existing bubbles
         while self.messages_layout.count() > 1:
             item = self.messages_layout.takeAt(0)
             widget = item.widget()
@@ -304,8 +363,12 @@ class ChatPage(QWidget):
 
         self._scroll_to_bottom()
 
+    # -------------------------------------------------------------------------
+    # Asynchronous Message Sending & Cancellation
+    # -------------------------------------------------------------------------
+
     def send_message(self) -> None:
-        """Send user message, persist to SQLite, and generate mock assistant response."""
+        """Send user message and dispatch async inference to active AI provider."""
         text = self.message_input.text().strip()
         if not text or not self.active_conv_id:
             return
@@ -313,15 +376,14 @@ class ChatPage(QWidget):
         self.message_input.clear()
         now = datetime.now(timezone.utc).isoformat()
 
-        # Add user message to SQLite and UI
+        # Add user message to DB and UI
         db.add_message(self.active_conv_id, "user", text)
         user_bubble = ChatBubble(role="user", content=text, timestamp=now)
         self.messages_layout.insertWidget(self.messages_layout.count() - 1, user_bubble)
 
-        # Update conversation title if first message
+        # Auto-title conversation on first user query
         messages = db.get_messages(self.active_conv_id)
         if len(messages) == 2 and messages[0]["role"] == "assistant":
-            # Auto-title conversation from first user query
             new_title = text[:28] + ("..." if len(text) > 28 else "")
             db.update_conversation_title(self.active_conv_id, new_title)
             self.conv_title_label.setText(new_title)
@@ -331,55 +393,78 @@ class ChatPage(QWidget):
 
         self._scroll_to_bottom()
 
-        # Show simulated thinking state
+        # Update UI state for background processing
+        provider = registry.get_active_provider()
+        self.thinking_label.setText(f"⚡ Connecting to {provider.display_name}...")
         self.thinking_label.setVisible(True)
+        self.stop_btn.setVisible(True)
         self.send_btn.setEnabled(False)
 
-        # Simulate local response after 600ms safely
-        def safe_reply():
-            try:
-                self._generate_mock_response(text)
-            except RuntimeError:
-                pass
+        # Launch asynchronous AI worker thread
+        # Prepare context history
+        history = [
+            {"role": m["role"], "content": m["content"]}
+            for m in messages
+        ]
 
-        QTimer.singleShot(600, safe_reply)
+        self.ai_worker = AIWorkerThread(provider, history, parent=self)
+        self.ai_worker.response_ready.connect(self._on_ai_response)
+        self.ai_worker.failed.connect(self._on_ai_failure)
+        self.ai_worker.start()
 
-    def _generate_mock_response(self, user_query: str) -> None:
-        """Generate intelligent mock response demonstrating complete offline loop."""
-        try:
-            self.thinking_label.setVisible(False)
-            self.send_btn.setEnabled(True)
-
-            if not self.active_conv_id:
-                return
-
-            # Simple keyword matching to simulate useful local responses
-            query_lower = user_query.lower()
-            if "hello" in query_lower or "hi" in query_lower:
-                reply = "Greetings! APEX desktop is running in Stage 1 offline mode. All messages are securely saved to your local SQLite database."
-            elif "status" in query_lower or "system" in query_lower:
-                reply = "System Status: Nominal. Process running on Intel Core i3 with 8 GB RAM optimization. No cloud network dependencies currently active."
-            elif "roadmap" in query_lower or "stage" in query_lower:
-                reply = "Currently on Stage 1 (Core Desktop). Stage 2 will introduce the cloud AI provider adapter (Google Gemini / OpenAI / Ollama)."
-            else:
-                reply = f"Acknowledged: \"{user_query}\". Stage 1 desktop shell and SQLite persistence verified. Cloud AI reasoning will connect in Stage 2."
+    def cancel_generation(self) -> None:
+        """Cancel ongoing AI worker thread."""
+        if self.ai_worker and self.ai_worker.isRunning():
+            self.ai_worker.cancel()
+            self.ai_worker.wait(500)
 
             now = datetime.now(timezone.utc).isoformat()
-            db.add_message(self.active_conv_id, "assistant", reply)
-            assistant_bubble = ChatBubble(role="assistant", content=reply, timestamp=now)
+            cancel_msg = "*(Generation cancelled by user)*"
+            if self.active_conv_id:
+                db.add_message(self.active_conv_id, "assistant", cancel_msg)
+            assistant_bubble = ChatBubble(role="assistant", content=cancel_msg, timestamp=now)
             self.messages_layout.insertWidget(self.messages_layout.count() - 1, assistant_bubble)
             self._scroll_to_bottom()
-        except RuntimeError:
-            pass
+
+        self._reset_composer_state()
+
+    def closeEvent(self, event) -> None:
+        """Ensure background threads are safely terminated upon page closure."""
+        if self.ai_worker and self.ai_worker.isRunning():
+            self.ai_worker.cancel()
+            self.ai_worker.wait(500)
+        super().closeEvent(event)
+
+    def _on_ai_response(self, response: ProviderResponse) -> None:
+        """Handle successful response from background AI worker."""
+        self._reset_composer_state()
+        if not self.active_conv_id:
+            return
+
+        now = datetime.now(timezone.utc).isoformat()
+        db.add_message(self.active_conv_id, "assistant", response.content)
+        assistant_bubble = ChatBubble(role="assistant", content=response.content, timestamp=now)
+        self.messages_layout.insertWidget(self.messages_layout.count() - 1, assistant_bubble)
+        self._scroll_to_bottom()
+
+    def _on_ai_failure(self, error_message: str) -> None:
+        """Handle error from background AI worker."""
+        self._reset_composer_state()
+        if not self.active_conv_id:
+            return
+
+        now = datetime.now(timezone.utc).isoformat()
+        err_text = f"⚠️ Error: {error_message}"
+        db.add_message(self.active_conv_id, "assistant", err_text)
+        assistant_bubble = ChatBubble(role="assistant", content=err_text, timestamp=now)
+        self.messages_layout.insertWidget(self.messages_layout.count() - 1, assistant_bubble)
+        self._scroll_to_bottom()
+
+    def _reset_composer_state(self) -> None:
+        self.thinking_label.setVisible(False)
+        self.stop_btn.setVisible(False)
+        self.send_btn.setEnabled(True)
 
     def _scroll_to_bottom(self) -> None:
-        def do_scroll():
-            try:
-                if hasattr(self, "scroll_area") and self.scroll_area:
-                    bar = self.scroll_area.verticalScrollBar()
-                    if bar:
-                        bar.setValue(bar.maximum())
-            except (RuntimeError, AttributeError):
-                pass
-
-        QTimer.singleShot(50, do_scroll)
+        """No-op as scroll tracking is automatically handled by scrollBar.rangeChanged."""
+        pass

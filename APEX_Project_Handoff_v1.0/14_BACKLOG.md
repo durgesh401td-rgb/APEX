@@ -17,12 +17,12 @@
 
 ## Stage 2 — AI connection
 
-- [ ] Select a provider with free-tier/zero-cost option.
-- [ ] Confirm provider terms and data handling.
-- [ ] Implement provider adapter.
-- [ ] Add secure credential storage.
-- [ ] Add timeout/cancel/error handling.
-- [ ] Display usage and connection state.
+- [x] Select a provider with free-tier/zero-cost option (Google Gemini 2.5 Flash).
+- [x] Confirm provider terms and data handling.
+- [x] Implement provider adapter (BaseAIProvider, MockAIProvider, GeminiAIProvider, ProviderRegistry).
+- [x] Add secure credential storage (Windows Credential Manager / keyring).
+- [x] Add timeout/cancel/error handling (AIWorkerThread with stop generation).
+- [x] Display usage and connection state (Dynamic provider status pill & real-time connection tester).
 
 ## Later stages
 

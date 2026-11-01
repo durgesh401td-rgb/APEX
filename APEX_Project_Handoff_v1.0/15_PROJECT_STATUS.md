@@ -1,10 +1,10 @@
 # 15 — Project Status
 
 **Product:** APEX  
-**Version:** v0.1.0 (Stage 1 Core Desktop Complete)  
+**Version:** v0.2.0 (Stage 2 AI Connection Complete)  
 **Date:** 2026-11-01  
-**Current phase:** Stage 1 Verified; Ready for Stage 2 (AI Connection)  
-**Implementation:** Stage 1 Core Desktop operational  
+**Current phase:** Stage 2 Verified; Ready for Stage 3 (Memory Vault)  
+**Implementation:** Stage 1 & Stage 2 operational  
 **Budget:** ₹0
 
 ## Completed
@@ -27,13 +27,17 @@
 - Settings page with tabs (General, AI Provider, Appearance, Security, About).
 - Local SQLite database persistence for conversations, messages, and settings.
 - Security redaction filter in structured logging (zero API keys/tokens leaked).
-- Automated test suite (11/11 tests passing via `pytest`).
+- Stage 2 AI Provider Adapter Architecture (BaseAIProvider, MockAIProvider, GeminiAIProvider, ProviderRegistry).
+- Windows Credential Manager DPAPI vault integration via keyring for API key storage.
+- Non-blocking background worker thread (AIWorkerThread) in ChatPage with live Stop/Cancel button.
+- Real-time API connection tester in Settings.
+- Automated test suite (17/17 tests passing via `pytest`).
 
 ## Pending owner decisions
 
-- Choice of primary cloud AI provider for Stage 2 (Google Gemini API free tier recommended for ₹0 budget).
-- Approval to begin Stage 2 implementation.
+- Optional: Enter your free Google Gemini API key in Settings → AI Provider if you want live cloud responses.
+- Approval to proceed to Stage 3 (Memory Vault).
 
 ## Next action
 
-Begin Stage 2: AI Provider Connection (Provider adapter interface, zero-secret storage with Windows Credential Manager, error/timeout handling).
+Begin Stage 3: User Memory Vault (Separation of conversational history from long-term memory, user-approved memory inspection, editing, and granular forget controls).
