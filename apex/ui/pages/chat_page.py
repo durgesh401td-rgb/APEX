@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 from apex.core.database import db
 from apex.core.logging import logger
+from apex.core.memory import memory_service
 from apex.core.providers.base import BaseAIProvider, ProviderResponse
 from apex.core.providers.registry import registry
 from apex.ui.styles.palette import (
@@ -400,14 +401,27 @@ class ChatPage(QWidget):
         self.stop_btn.setVisible(True)
         self.send_btn.setEnabled(False)
 
-        # Launch asynchronous AI worker thread
+        # Explicit user memory saving check (never silent)
+        text_lower = text.lower()
+        if text_lower.startswith("remember:") or text_lower.startswith("remember that "):
+            fact = text.split(":", 1)[1].strip() if ":" in text else text[14:].strip()
+            if fact:
+                memory_service.add_memory(fact, category="fact")
+                logger.info("Explicit memory saved from chat command: %s", fact[:30])
+
         # Prepare context history
         history = [
             {"role": m["role"], "content": m["content"]}
             for m in messages
         ]
 
-        self.ai_worker = AIWorkerThread(provider, history, parent=self)
+        # Inject long-term memory context into system instruction if enabled
+        system_prompt = "You are APEX, a helpful, precise personal AI assistant for Windows."
+        memory_context = memory_service.get_context_for_prompt()
+        if memory_context:
+            system_prompt += f"\n\n{memory_context}"
+
+        self.ai_worker = AIWorkerThread(provider, history, system_prompt=system_prompt, parent=self)
         self.ai_worker.response_ready.connect(self._on_ai_response)
         self.ai_worker.failed.connect(self._on_ai_failure)
         self.ai_worker.start()

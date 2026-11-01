@@ -125,3 +125,29 @@ def test_chat_page_cancel_generation(qapp):
     assert chat_page.stop_btn.isVisible() is False
     assert chat_page.send_btn.isEnabled() is True
     assert chat_page.thinking_label.isVisible() is False
+
+
+def test_memory_page_navigation_and_cards(qapp):
+    """Verify navigation to MemoryPage and memory card rendering."""
+    from apex.core.memory import MemoryService
+    window = MainWindow()
+
+    # Navigate to Memory (Index 5)
+    window.nav_rail._button_group.button(5).click()
+    assert window.stack.currentIndex() == 5
+
+    memory_page = window.memory_page
+    MemoryService.add_memory("User prefers dark navy interface", category="preference")
+    memory_page.refresh_memories()
+
+    # Check card layout has cards
+    assert memory_page.cards_layout.count() >= 2
+    assert "Active" in memory_page.pause_btn.text()
+
+    # Toggle pause
+    memory_page.pause_btn.click()
+    assert "Paused" in memory_page.pause_btn.text()
+
+    # Toggle back to active
+    memory_page.pause_btn.click()
+    assert "Active" in memory_page.pause_btn.text()

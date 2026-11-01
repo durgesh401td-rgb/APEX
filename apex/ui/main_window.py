@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 from apex.core.config import config
 from apex.ui.pages.chat_page import ChatPage
 from apex.ui.pages.home_page import HomePage
+from apex.ui.pages.memory_page import MemoryPage
 from apex.ui.pages.placeholder_page import PlaceholderPage
 from apex.ui.pages.settings_page import SettingsPage
 from apex.ui.widgets.nav_rail import NavRail
@@ -64,13 +65,7 @@ class MainWindow(QMainWindow):
             "📁",
             self
         )
-        self.memory_page = PlaceholderPage(
-            "User Memory Vault",
-            "Inspect, edit, pause, and clear long-term memory facts with complete control.",
-            "Stage 3 (Memory)",
-            "🧠",
-            self
-        )
+        self.memory_page = MemoryPage(self)
         self.devices_page = PlaceholderPage(
             "Device Companion",
             "Authenticated, encrypted local Wi-Fi pairing for Android notifications and media sync.",

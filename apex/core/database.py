@@ -70,6 +70,18 @@ class Database:
                 );
             """)
 
+            # User-Approved Long-Term Memory table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS memories (
+                    id TEXT PRIMARY KEY,
+                    category TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+            """)
+
             # Performance indices
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_messages_conv 
@@ -78,6 +90,14 @@ class Database:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_conv_updated 
                 ON conversations(updated_at DESC);
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memories_cat 
+                ON memories(category);
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_memories_updated 
+                ON memories(updated_at DESC);
             """)
             conn.commit()
             logger.debug("Database initialized at %s", self.db_path)
@@ -204,6 +224,103 @@ class Database:
             )
             row = cursor.fetchone()
             return row["value"] if row else default
+
+    # -------------------------------------------------------------------------
+    # Long-Term Memory Operations
+    # -------------------------------------------------------------------------
+
+    def add_memory(
+        self,
+        content: str,
+        category: str = "general",
+        source: str = "user_explicit",
+        memory_id: Optional[str] = None,
+    ) -> str:
+        """Add a user-approved piece of information to long-term memory."""
+        memory_id = memory_id or str(uuid.uuid4())
+        now = _get_utc_now()
+        with self._connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO memories (id, category, content, source, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (memory_id, category.lower(), content.strip(), source, now, now),
+            )
+            conn.commit()
+        logger.info("Added memory %s [%s]: '%s'", memory_id, category, content[:40])
+        return memory_id
+
+    def list_memories(
+        self,
+        search_query: Optional[str] = None,
+        category: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List long-term memories with optional search and category filters."""
+        sql = "SELECT id, category, content, source, created_at, updated_at FROM memories WHERE 1=1"
+        params = []
+
+        if category and category.lower() != "all":
+            sql += " AND category = ?"
+            params.append(category.lower())
+
+        if search_query and search_query.strip():
+            sql += " AND content LIKE ?"
+            params.append(f"%{search_query.strip()}%")
+
+        sql += " ORDER BY updated_at DESC;"
+
+        with self._connection() as conn:
+            cursor = conn.execute(sql, tuple(params))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_memory(self, memory_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a single memory record by ID."""
+        with self._connection() as conn:
+            cursor = conn.execute(
+                "SELECT id, category, content, source, created_at, updated_at FROM memories WHERE id = ?;",
+                (memory_id,),
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def update_memory(
+        self,
+        memory_id: str,
+        new_content: str,
+        new_category: Optional[str] = None,
+    ) -> bool:
+        """Update the content or category of a memory."""
+        now = _get_utc_now()
+        with self._connection() as conn:
+            if new_category:
+                res = conn.execute(
+                    "UPDATE memories SET content = ?, category = ?, updated_at = ? WHERE id = ?;",
+                    (new_content.strip(), new_category.lower(), now, memory_id),
+                )
+            else:
+                res = conn.execute(
+                    "UPDATE memories SET content = ?, updated_at = ? WHERE id = ?;",
+                    (new_content.strip(), now, memory_id),
+                )
+            conn.commit()
+            return res.rowcount > 0
+
+    def delete_memory(self, memory_id: str) -> bool:
+        """Delete a single memory record."""
+        with self._connection() as conn:
+            res = conn.execute("DELETE FROM memories WHERE id = ?;", (memory_id,))
+            conn.commit()
+            logger.info("Deleted memory %s", memory_id)
+            return res.rowcount > 0
+
+    def clear_all_memories(self) -> int:
+        """Wipe all stored long-term memories permanently."""
+        with self._connection() as conn:
+            res = conn.execute("DELETE FROM memories;")
+            conn.commit()
+            logger.warning("All long-term memories have been cleared (%s deleted)", res.rowcount)
+            return res.rowcount
 
 
 # Global database instance

@@ -24,6 +24,16 @@
 - [x] Add timeout/cancel/error handling (AIWorkerThread with stop generation).
 - [x] Display usage and connection state (Dynamic provider status pill & real-time connection tester).
 
+## Stage 3 — Memory
+
+- [x] Separate chat history from long-term memory in SQLite.
+- [x] Implement MemoryService for user-approved facts and prompt context injection.
+- [x] Build dedicated User Memory Vault screen (inspect, search, add, edit, delete).
+- [x] Add explicit save/forget controls (never silently convert chats into memory).
+- [x] Add memory pause/resume toggle with visual state indicator.
+- [x] Add clear vault confirmation workflow.
+- [x] Automated test coverage for memory persistence and UI.
+
 ## Later stages
 
 See `06_ROADMAP.md`. Do not start later-stage work before Stage 1 acceptance is met.
