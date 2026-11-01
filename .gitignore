@@ -48,3 +48,7 @@ logs/
 .idea/
 .DS_Store
 Thumbs.db
+
+
+# Internal handoff documentation (local only)
+APEX_Project_Handoff_v1.0/
