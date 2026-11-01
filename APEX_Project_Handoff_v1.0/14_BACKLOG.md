@@ -2,18 +2,18 @@
 
 ## Stage 1 — Core desktop
 
-- [ ] Inspect current workspace and Git state.
-- [ ] Confirm project directory and naming.
-- [ ] Check available Python interpreters and package compatibility.
-- [ ] Create isolated project environment after approval.
-- [ ] Establish logging and configuration.
-- [ ] Create desktop window shell.
-- [ ] Implement sidebar navigation.
-- [ ] Create separate Home and Chat pages.
-- [ ] Implement chat composer and local demo response.
-- [ ] Add SQLite conversation persistence.
-- [ ] Add Settings page and theme tokens.
-- [ ] Add tests and setup documentation.
+- [x] Inspect current workspace and Git state.
+- [x] Confirm project directory and naming.
+- [x] Check available Python interpreters and package compatibility.
+- [x] Create isolated project environment after approval.
+- [x] Establish logging and configuration.
+- [x] Create desktop window shell.
+- [x] Implement sidebar navigation.
+- [x] Create separate Home and Chat pages.
+- [x] Implement chat composer and local demo response.
+- [x] Add SQLite conversation persistence.
+- [x] Add Settings page and theme tokens.
+- [x] Add tests and setup documentation.
 
 ## Stage 2 — AI connection
 
